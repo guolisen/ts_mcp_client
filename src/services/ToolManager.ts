@@ -164,7 +164,7 @@ ${toolsDescription}
 
 Choose the appropriate tool based on the user's question. If no tool is needed, reply directly.
 
-IMPORTANT: When you need to use a tool, you must ONLY respond with the exact JSON object format below, nothing else:
+IMPORTANT: When you need to use a tool, you must ONLY respond with the exact JSON object format below, nothing else, stop to think anything, just return json data:
 {
     "tool": "tool-name",
     "arguments": {
@@ -179,7 +179,8 @@ After receiving a tool's response:
 4. Use appropriate context from the user's question
 5. Avoid simply repeating the raw data
 
-Please use only the tools that are explicitly defined above.`;
+Please use only the tools that are explicitly defined above.
+When you need to use a tool, stop thinking and only return json data`;
   }
 }
 
