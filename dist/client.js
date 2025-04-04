@@ -2,6 +2,7 @@ import readline from 'readline';
 import { loadConfig } from './config/configLoader.js';
 import MCPService from './services/MCPService.js';
 import LLMService from './services/LLMService.js';
+import ToolManager from './services/ToolManager.js';
 // Create readline interface for console input/output
 const rl = readline.createInterface({
     input: process.stdin,
@@ -19,6 +20,27 @@ class MCPClient {
         if (this.config.defaultMCPServer && this.config.mcpServers[this.config.defaultMCPServer]) {
             this.activeServer = this.config.mcpServers[this.config.defaultMCPServer];
             console.log(`Default MCP server set to: ${this.activeServer.name}`);
+            // Set active server in ToolManager
+            ToolManager.setActiveServer(this.activeServer);
+            // Load tools from the server
+            this.loadTools();
+        }
+    }
+    /**
+     * Load tools from the active server
+     */
+    async loadTools() {
+        if (!this.activeServer) {
+            console.log('No active server to load tools from.');
+            return;
+        }
+        try {
+            await ToolManager.loadTools();
+            const tools = ToolManager.getTools();
+            console.log(`Loaded ${tools.length} tools from ${this.activeServer.name}`);
+        }
+        catch (error) {
+            console.error('Error loading tools:', error);
         }
     }
     /**
@@ -95,6 +117,10 @@ class MCPClient {
             }
             this.activeServer = server;
             console.log(`Active MCP server set to: ${server.name}`);
+            // Update ToolManager with the new active server
+            ToolManager.setActiveServer(this.activeServer);
+            // Load tools from the new server
+            this.loadTools();
         }
         else {
             console.log(`Server '${serverKey}' not found.`);
@@ -167,27 +193,77 @@ class MCPClient {
         // Add user message to history
         this.history.push({ role: 'user', content: message });
         try {
-            // Send request to LLM
-            const response = await this.llmService.chat(this.history);
-            // Print response
-            console.log(`\nLLM: ${response.text}\n`);
-            // Add assistant message to history
-            this.history.push({ role: 'assistant', content: response.text });
-            // Print token usage if available
-            if (response.usage) {
-                const { promptTokens, completionTokens, totalTokens } = response.usage;
-                console.log('Token Usage:');
-                if (promptTokens !== undefined)
-                    console.log(`- Prompt tokens: ${promptTokens}`);
-                if (completionTokens !== undefined)
-                    console.log(`- Completion tokens: ${completionTokens}`);
-                if (totalTokens !== undefined)
-                    console.log(`- Total tokens: ${totalTokens}`);
-                console.log();
+            // Check if tools are available
+            const tools = ToolManager.getTools();
+            const useTools = tools.length > 0;
+            // Send request to LLM with tool information if available
+            const response = await this.llmService.chat(this.history, useTools);
+            // Check if the response is a tool call
+            if (response.isToolCall && response.toolCall) {
+                console.log(`\nLLM wants to use tool: ${response.toolCall.tool}`);
+                console.log(`Arguments: ${JSON.stringify(response.toolCall.arguments, null, 2)}\n`);
+                // Add the tool call to history
+                this.history.push({ role: 'assistant', content: response.text });
+                try {
+                    // Execute the tool
+                    const toolResult = await ToolManager.executeTool(response.toolCall);
+                    console.log(`\nTool result: ${JSON.stringify(toolResult, null, 2)}\n`);
+                    // Add the tool result to history as a system message
+                    const toolResultContent = `Tool execution result: ${JSON.stringify(toolResult)}`;
+                    this.history.push({ role: 'system', content: toolResultContent });
+                    // Create a new message to the LLM that combines the context with tool result
+                    // This ensures the LLM has the full context to generate a conversational response
+                    const finalResponse = await this.llmService.chat(this.history, useTools);
+                    // Print final response
+                    console.log(`\nLLM: ${finalResponse.text}\n`);
+                    // Add final assistant message to history
+                    this.history.push({ role: 'assistant', content: finalResponse.text });
+                    // Print token usage if available
+                    this.printTokenUsage(finalResponse);
+                }
+                catch (toolError) {
+                    console.error(`Error executing tool: ${toolError}`);
+                    // Inform LLM about the error as a system message
+                    const errorContent = `Error executing tool: ${toolError}`;
+                    this.history.push({ role: 'system', content: errorContent });
+                    // Get error handling response from LLM with full context
+                    const errorResponse = await this.llmService.chat(this.history, useTools);
+                    // Print error handling response
+                    console.log(`\nLLM: ${errorResponse.text}\n`);
+                    // Add error handling response to history
+                    this.history.push({ role: 'assistant', content: errorResponse.text });
+                    // Print token usage if available
+                    this.printTokenUsage(errorResponse);
+                }
+            }
+            else {
+                // Regular response (no tool call)
+                console.log(`\nLLM: ${response.text}\n`);
+                // Add assistant message to history
+                this.history.push({ role: 'assistant', content: response.text });
+                // Print token usage if available
+                this.printTokenUsage(response);
             }
         }
         catch (error) {
             console.error(`Error sending message to LLM: ${error}`);
+        }
+    }
+    /**
+     * Print token usage information if available
+     * @param response - The LLM response
+     */
+    printTokenUsage(response) {
+        if (response.usage) {
+            const { promptTokens, completionTokens, totalTokens } = response.usage;
+            console.log('Token Usage:');
+            if (promptTokens !== undefined)
+                console.log(`- Prompt tokens: ${promptTokens}`);
+            if (completionTokens !== undefined)
+                console.log(`- Completion tokens: ${completionTokens}`);
+            if (totalTokens !== undefined)
+                console.log(`- Total tokens: ${totalTokens}`);
+            console.log();
         }
     }
     /**
@@ -311,6 +387,14 @@ class MCPClient {
         console.log(`LLM provider: ${this.config.llm.provider}`);
         if (this.activeServer) {
             console.log(`Active MCP server: ${this.activeServer.name}`);
+            // List loaded tools
+            const tools = ToolManager.getTools();
+            if (tools.length > 0) {
+                console.log(`Loaded ${tools.length} tools for LLM to use.`);
+            }
+            else {
+                console.log('No tools loaded. LLM will not be able to use tools.');
+            }
         }
         else {
             console.log('No active MCP server.');

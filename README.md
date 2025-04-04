@@ -1,11 +1,12 @@
 # TypeScript MCP Client
 
-A TypeScript-based Model Context Protocol (MCP) client for testing MCP servers, with support for multiple LLM providers.
+A TypeScript-based Model Context Protocol (MCP) client for testing MCP servers, with support for multiple LLM providers and LLM tool calling capabilities.
 
 ## Features
 
 - Support for multiple LLM providers (Ollama, OpenAI, OpenRouter, Deepseek)
 - Support for MCP servers (default: mcp_k8s_server)
+- LLM tool calling through MCP servers
 - Configurable via JSON config file or environment variables
 - Interactive console interface for testing
 
@@ -184,49 +185,152 @@ Note: Ollama typically doesn't require an API key when running locally.
 
 Once the client is running, you can use the following commands:
 
-- `help`: Show available commands
-- `servers`: List available MCP servers
-- `use <server-key>`: Set the active MCP server
-- `enable <server>`: Enable an MCP server
-- `disable <server>`: Disable an MCP server
-- `tools`: List tools for the active MCP server
-- `resources`: List resources for the active MCP server
-- `call <tool> <args>`: Call a tool with JSON arguments
-- `resource <uri>`: Read a resource from the active MCP server
-- `clear`: Clear chat history
-- `config`: Show current configuration
-- `exit/quit`: Exit the application
+### Basic Commands
 
-## Example Session
+- `help`: Show available commands
+  ```
+  > help
+  ```
+
+- `exit` or `quit`: Exit the application
+  ```
+  > exit
+  ```
+
+### Server Management
+
+- `servers`: List available MCP servers
+  ```
+  > servers
+  
+  Available MCP Servers:
+  ---------------------
+  * 1. mcp_k8s_server (Enabled)
+    2. custom_mcp_server (Disabled)
+  ```
+
+- `use <server-key>`: Set the active MCP server
+  ```
+  > use k8s
+  Active MCP server set to: mcp_k8s_server
+  ```
+
+- `enable <server>`: Enable an MCP server
+  ```
+  > enable custom
+  Server 'custom_mcp_server' enabled.
+  ```
+
+- `disable <server>`: Disable an MCP server
+  ```
+  > disable custom
+  Server 'custom_mcp_server' disabled.
+  ```
+
+### Tool and Resource Interaction
+
+- `tools`: List tools for the active MCP server
+  ```
+  > tools
+  
+  Tools for mcp_k8s_server:
+  -------------------------
+  1. get_pods
+     Description: Get all pods in the namespace
+  
+  2. get_pod_logs
+     Description: Get logs for a specific pod
+  ```
+
+- `resources`: List resources for the active MCP server
+  ```
+  > resources
+  
+  Resources for mcp_k8s_server:
+  -------------------------
+  1. k8s://namespaces
+     Name: Kubernetes Namespaces
+     Description: List of all namespaces in the cluster
+  ```
+
+- `call <tool> <args>`: Call a tool with JSON arguments
+  ```
+  > call get_pods {"namespace": "default"}
+  
+  Tool Result:
+  ------------
+  {
+    "content": [
+      {
+        "type": "text",
+        "text": "[{\"name\":\"nginx-pod\",\"namespace\":\"default\",\"status\":\"Running\"}]"
+      }
+    ]
+  }
+  ```
+
+- `resource <uri>`: Read a resource from the active MCP server
+  ```
+  > resource k8s://namespaces
+  
+  Resource Content:
+  -----------------
+  {
+    "contents": [
+      {
+        "uri": "k8s://namespaces",
+        "text": "[\"default\", \"kube-system\", \"kube-public\"]"
+      }
+    ]
+  }
+  ```
+
+### Chat and Configuration
+
+- `clear`: Clear chat history
+  ```
+  > clear
+  Chat history cleared.
+  ```
+
+- `config`: Show current configuration
+  ```
+  > config
+  
+  Current Configuration:
+  ---------------------
+  {
+    "llm": {
+      "provider": "openai",
+      "baseUrl": "https://api.openai.com/v1",
+      "model": "gpt-3.5-turbo",
+      "temperature": 0.7,
+      "maxTokens": 1000
+    },
+    "mcpServers": {
+      "k8s": {
+        "name": "mcp_k8s_server",
+        "baseUrl": "http://192.168.182.128:8000/sse",
+        "enabled": true
+      }
+    },
+    "defaultMCPServer": "k8s"
+  }
+  ```
+
+### Chat Examples
+
+You can also send any message to chat with the LLM:
 
 ```
-MCP Client started.
-LLM provider: ollama
-Active MCP server: mcp_k8s_server
+> What pods are running in the default namespace?
 
-Type "help" for available commands.
-> servers
+LLM wants to use tool: get_pods
+Arguments: {
+  "namespace": "default"
+}
 
-Available MCP Servers:
----------------------
-* 1. mcp_k8s_server (Enabled)
-  2. custom_mcp_server (Disabled)
-
-> tools
-
-Tools for mcp_k8s_server:
--------------------------
-1. get_pods
-   Description: Get all pods in the namespace
-
-2. get_pod_logs
-   Description: Get logs for a specific pod
-
-> call get_pods {"namespace": "default"}
-
-Tool Result:
-------------
-{
+Tool result: {
   "content": [
     {
       "type": "text",
@@ -234,6 +338,111 @@ Tool Result:
     }
   ]
 }
+
+LLM: I found 1 pod running in the default namespace:
+- nginx-pod (Status: Running)
+```
+
+```
+> Tell me a joke about programming.
+
+LLM: Why do programmers prefer dark mode?
+
+Because light attracts bugs!
+```
+
+## LLM Tool Calling
+
+The client now supports LLM tool calling, allowing the LLM to:
+1. Learn about available tools from MCP servers
+2. Decide when to use tools based on user queries
+3. Return a JSON tool call when needed
+4. Process tool results and provide a conversational response
+
+### How Tool Calling Works
+
+1. When you send a message to an LLM with tools available:
+   - The system prompt includes detailed tool descriptions
+   - The LLM can choose to answer directly or call a tool
+
+2. If the LLM decides to call a tool, it will respond with a JSON object:
+   ```json
+   {
+     "tool": "tool-name",
+     "arguments": {
+       "argument-name": "value"
+     }
+   }
+   ```
+
+3. The client will:
+   - Parse this response and recognize it as a tool call
+   - Execute the tool with the provided arguments
+   - Add the tool result to the conversation history
+   - Send the complete conversation history (including the tool result) back to the LLM
+   - Get a natural, conversational response that incorporates the tool result
+   - Display this final response to the user
+
+### Detailed Tool Calling Workflow
+
+The tool calling workflow follows these steps:
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Client
+    participant LLM
+    participant MCP Server
+    
+    User->>Client: User question
+    Client->>LLM: Send question with chat history & tool descriptions
+    LLM-->>Client: Return tool call JSON
+    Client->>MCP Server: Execute tool with parameters
+    MCP Server-->>Client: Return tool result
+    
+    Note over Client: Add tool result to chat history
+    
+    Client->>LLM: Send updated chat history with tool result
+    LLM-->>Client: Return final conversational response
+    Client->>User: Display user-friendly response
+```
+
+This ensures the LLM has full context when generating its final response, resulting in more natural and helpful answers that properly incorporate the tool information.
+
+### Example Tool Calling Session
+
+```
+MCP Client started.
+LLM provider: openai
+Active MCP server: mcp_k8s_server
+Loaded 3 tools for LLM to use.
+
+Type "help" for available commands.
+> What pods are running in the default namespace?
+
+LLM wants to use tool: get_pods
+Arguments: {
+  "namespace": "default"
+}
+
+Tool result: {
+  "content": [
+    {
+      "type": "text",
+      "text": "[{\"name\":\"nginx-pod\",\"namespace\":\"default\",\"status\":\"Running\"}]"
+    }
+  ]
+}
+
+LLM: I found 1 pod running in the default namespace:
+- nginx-pod (Status: Running)
+
+> servers
+
+Available MCP Servers:
+---------------------
+* 1. mcp_k8s_server (Enabled)
+  2. custom_mcp_server (Disabled)
 
 > exit
 ```

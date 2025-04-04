@@ -1,6 +1,9 @@
 import { LLMConfig } from '../config/config.js';
+import { ToolCall } from './ToolManager.js';
 export interface LLMResponse {
     text: string;
+    isToolCall?: boolean;
+    toolCall?: ToolCall;
     usage?: {
         promptTokens?: number;
         completionTokens?: number;
@@ -13,17 +16,26 @@ export declare class LLMService {
     /**
      * Send a chat request to an LLM provider
      * @param messages - The messages to send
+     * @param includeTools - Whether to include tool descriptions in the system message
      * @returns The response from the LLM
      */
     chat(messages: Array<{
         role: string;
         content: string;
-    }>): Promise<LLMResponse>;
+    }>, includeTools?: boolean): Promise<LLMResponse>;
     /**
-     * Send a chat request to Ollama
-     * @param messages - The messages to send
-     * @returns The response from Ollama
+     * Prepare messages with tool descriptions if needed
+     * @param messages - The original messages
+     * @param includeTools - Whether to include tool descriptions
+     * @returns The processed messages
      */
+    private prepareMessages;
+    /**
+     * Process the raw LLM response to check for tool calls
+     * @param response - The raw LLM response
+     * @returns The processed response with tool call information
+     */
+    private processResponse;
     private ollamaChat;
     /**
      * Send a chat request to OpenAI

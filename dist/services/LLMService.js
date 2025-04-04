@@ -1,4 +1,5 @@
 import axios from 'axios';
+import ToolManager from './ToolManager.js';
 export class LLMService {
     constructor(config) {
         this.config = config;
@@ -6,27 +7,72 @@ export class LLMService {
     /**
      * Send a chat request to an LLM provider
      * @param messages - The messages to send
+     * @param includeTools - Whether to include tool descriptions in the system message
      * @returns The response from the LLM
      */
-    async chat(messages) {
+    async chat(messages, includeTools = false) {
+        // Prepare messages with tool descriptions if requested
+        const processedMessages = this.prepareMessages(messages, includeTools);
         switch (this.config.provider.toLowerCase()) {
             case 'ollama':
-                return this.ollamaChat(messages);
+                return this.processResponse(await this.ollamaChat(processedMessages));
             case 'openai':
-                return this.openAIChat(messages);
+                return this.processResponse(await this.openAIChat(processedMessages));
             case 'openrouter':
-                return this.openRouterChat(messages);
+                return this.processResponse(await this.openRouterChat(processedMessages));
             case 'deepseek':
-                return this.deepseekChat(messages);
+                return this.processResponse(await this.deepseekChat(processedMessages));
             default:
                 throw new Error(`Unsupported LLM provider: ${this.config.provider}`);
         }
     }
     /**
-     * Send a chat request to Ollama
-     * @param messages - The messages to send
-     * @returns The response from Ollama
+     * Prepare messages with tool descriptions if needed
+     * @param messages - The original messages
+     * @param includeTools - Whether to include tool descriptions
+     * @returns The processed messages
      */
+    prepareMessages(messages, includeTools) {
+        if (!includeTools) {
+            return messages;
+        }
+        // Create a copy of the messages to avoid modifying the original
+        const result = [...messages];
+        // Find if there's already a system message
+        const systemIndex = result.findIndex(msg => msg.role === 'system');
+        const systemMessage = ToolManager.buildSystemMessage();
+        if (systemIndex >= 0) {
+            // Enhance the existing system message with tool information
+            result[systemIndex] = {
+                role: 'system',
+                content: systemMessage
+            };
+        }
+        else {
+            // Add a new system message at the beginning
+            result.unshift({
+                role: 'system',
+                content: systemMessage
+            });
+        }
+        return result;
+    }
+    /**
+     * Process the raw LLM response to check for tool calls
+     * @param response - The raw LLM response
+     * @returns The processed response with tool call information
+     */
+    processResponse(response) {
+        const toolCall = ToolManager.parseToolCall(response.text);
+        if (toolCall) {
+            return {
+                ...response,
+                isToolCall: true,
+                toolCall
+            };
+        }
+        return response;
+    }
     async ollamaChat(messages) {
         try {
             const response = await axios.post(`${this.config.baseUrl}/api/chat`, {

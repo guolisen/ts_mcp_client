@@ -5,6 +5,10 @@ declare class MCPClient {
     private history;
     constructor(configPath?: string);
     /**
+     * Load tools from the active server
+     */
+    private loadTools;
+    /**
      * List available MCP servers
      */
     listServers(): void;
@@ -43,6 +47,11 @@ declare class MCPClient {
      * @param message - The message to send
      */
     sendMessage(message: string): Promise<void>;
+    /**
+     * Print token usage information if available
+     * @param response - The LLM response
+     */
+    private printTokenUsage;
     /**
      * Clear the chat history
      */
